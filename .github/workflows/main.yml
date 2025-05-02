@@ -63,8 +63,8 @@ jobs:
         
       - name: Build Docker image for Cloudflare simulation
         run: |
-          docker build -t cloudflare-pages-sim -f d:\codeLab\codeTestings\personal\evp\revamp-build\Dockerfile.cloudflare .
-          
+          docker build -t cloudflare-pages-sim -f ./Dockerfile.cloudflare .
+                    
       - name: Run deployment simulation in Docker
         run: |
           docker run --rm -v ${PWD}:/app cloudflare-pages-sim
