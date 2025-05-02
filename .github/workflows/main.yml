@@ -31,289 +31,46 @@ jobs:
       - name: Run ES-Lint
         run: bun run lint
 
-  cloudflare-pages-simulation:
-    name: Cloudflare Pages Build Simulation
+  build:
+    name: Build Next.js Application
     runs-on: ubuntu-latest
     needs: lint
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-        
-      - name: Simulate Cloudflare Pages Build
-        run: |
-          # Create timestamp function to match Cloudflare format
-          timestamp() {
-            date -u +"%Y-%m-%dT%H:%M:%S.%NZ"
-          }
-          
-          # Clone repository logs
-          echo "$(timestamp)	Cloning repository..."
-          echo "$(timestamp)	From ${{ github.server_url }}/${{ github.repository }}"
-          echo "$(timestamp)	 * branch            ${{ github.sha }} -> FETCH_HEAD"
-          echo "$(timestamp)	"
-          echo "$(timestamp)	HEAD is now at $(echo ${{ github.sha }} | cut -c1-7) ${{ github.event.head_commit.message || 'Commit message not available' }}"
-          echo "$(timestamp)	"
-          echo "$(timestamp)	"
-          echo "$(timestamp)	Using v2 root directory strategy"
-          echo "$(timestamp)	Success: Finished cloning repository files"
-          
-          # Wrangler configuration check
-          echo "$(timestamp)	Checking for configuration in a Wrangler configuration file (BETA)"
-          echo "$(timestamp)	"
-          
-          if [ -f "wrangler.toml" ]; then
-            echo "$(timestamp)	Found wrangler.toml file. Reading build configuration..."
-            
-            # Extract pages_build_output_dir
-            BUILD_OUTPUT_DIR=$(grep "pages_build_output_dir" wrangler.toml | cut -d '=' -f2 | tr -d ' "' || echo ".vercel/output/static")
-            echo "$(timestamp)	pages_build_output_dir: $BUILD_OUTPUT_DIR"
-            
-            # Extract NODE_VERSION
-            NODE_VERSION=$(grep "NODE_VERSION" wrangler.toml | cut -d '=' -f2 | tr -d ' "' || echo "20.x")
-            echo "$(timestamp)	Build environment variables: "
-            echo "$(timestamp)	  - NODE_VERSION: $NODE_VERSION"
-            
-            # Set NODE_VERSION for later steps
-            echo "NODE_VERSION=$NODE_VERSION" >> $GITHUB_ENV
-            echo "BUILD_OUTPUT_DIR=$BUILD_OUTPUT_DIR" >> $GITHUB_ENV
-            
-            sleep 1
-            echo "$(timestamp)	Successfully read wrangler.toml file."
-          else
-            echo "$(timestamp)	No wrangler.toml file found. Using default configuration."
-            echo "NODE_VERSION=20.x" >> $GITHUB_ENV
-            echo "BUILD_OUTPUT_DIR=.vercel/output/static" >> $GITHUB_ENV
-          fi
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: 22.12.0
-          
       - name: Setup Bun
         uses: oven-sh/setup-bun@v1
         with:
           bun-version: "latest"
-          
-      - name: Detect Tools
-        run: |
-          timestamp() {
-            date -u +"%Y-%m-%dT%H:%M:%S.%NZ"
-          }
-          
-          echo "$(timestamp)	Detected the following tools from environment: nodejs@$(node -v | cut -c2-), bun@$(bun -v)"
-          echo "$(timestamp)	Installing nodejs $(node -v | cut -c2-)"
-          echo "$(timestamp)	Trying to update node-build... ok"
-          echo "$(timestamp)	To follow progress, use 'tail -f /tmp/node-build.$(date +%Y%m%d%H%M%S).486.log' or pass --verbose"
-          echo "$(timestamp)	Downloading node-v$(node -v | cut -c2-)-linux-x64.tar.gz..."
-          echo "$(timestamp)	-> https://nodejs.org/dist/v$(node -v | cut -c2-)/node-v$(node -v | cut -c2-)-linux-x64.tar.gz"
-          sleep 2
-          echo "$(timestamp)	Installing node-v$(node -v | cut -c2-)-linux-x64..."
-          echo "$(timestamp)	Installed node-v$(node -v | cut -c2-)-linux-x64 to /opt/buildhome/.asdf/installs/nodejs/$(node -v | cut -c2-)"
-          echo "$(timestamp)	"
 
-      - name: Install Dependencies
-        run: |
-          timestamp() {
-            date -u +"%Y-%m-%dT%H:%M:%S.%NZ"
-          }
-          
-          echo "$(timestamp)	Installing project dependencies: bun install --frozen-lockfile"
-          bun install --frozen-lockfile
-          
-          # Log installed packages similar to Cloudflare
-          echo "$(timestamp)	bun install v$(bun -v)"
-          echo "$(timestamp)	"
-          
-          # Get package list from package.json
-          DEPS=$(jq -r '.dependencies | keys | .[]' package.json 2>/dev/null || echo "")
-          DEV_DEPS=$(jq -r '.devDependencies | keys | .[]' package.json 2>/dev/null || echo "")
-          
-          # Log dependencies
-          for dep in $DEPS; do
-            VERSION=$(jq -r ".dependencies.\"$dep\"" package.json)
-            echo "$(timestamp)	+ $dep@$VERSION"
-          done
-          
-          for dep in $DEV_DEPS; do
-            VERSION=$(jq -r ".devDependencies.\"$dep\"" package.json)
-            echo "$(timestamp)	+ $dep@$VERSION"
-          done
-          
-          echo "$(timestamp)	"
-          echo "$(timestamp)	$(jq '.dependencies | length + .devDependencies | length' package.json 2>/dev/null || echo "Unknown number of") packages installed"
+      - name: Install dependencies
+        run: bun install
 
-      - name: Run Next-on-Pages Build
+      - name: Build Next.js
+        run: bun run build
+        
+  cloudflare-simulation:
+    name: Simulate Cloudflare Pages Environment
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        
+      - name: Set up Docker
+        uses: docker/setup-buildx-action@v2
+        
+      - name: Build Docker image for Cloudflare simulation
         run: |
-          timestamp() {
-            date -u +"%Y-%m-%dT%H:%M:%S.%NZ"
-          }
-          
-          echo "$(timestamp)	Executing user command: npx @cloudflare/next-on-pages@1"
-          
-          # Install next-on-pages
-          npm install -g @cloudflare/next-on-pages@1
-          
-          # Capture start time
-          START_TIME=$(date +%s)
-          
-          # Run next-on-pages and capture output
-          echo "$(timestamp)	⚡️ @cloudflare/next-on-pages CLI v.1.13.8"
-          echo "$(timestamp)	⚡️ Detected Package Manager: npm ($(npm -v))"
-          echo "$(timestamp)	⚡️ Preparing project..."
-          echo "$(timestamp)	"
-          echo "$(timestamp)	⚡️ The project is set up for bun but it is currently being run via npm this might lead to build errors, please be sure to use the same package manager your project uses when running @cloudflare/next-on-pages"
-          echo "$(timestamp)	"
-          echo "$(timestamp)	⚡️ Project is ready"
-          echo "$(timestamp)	⚡️ Building project..."
-          echo "$(timestamp)	▲  Vercel CLI 41.2.2"
-          echo "$(timestamp)	▲  > NOTE: The Vercel CLI now collects telemetry regarding usage of the CLI."
-          echo "$(timestamp)	▲  > This information is used to shape the CLI roadmap and prioritize features."
-          echo "$(timestamp)	▲  > You can learn more, including how to opt-out if you'd not like to participate in this program, by visiting the following URL:"
-          echo "$(timestamp)	▲  > https://vercel.com/docs/cli/about-telemetry"
-          echo "$(timestamp)	▲  Detected \`bun.lockb\` generated by bun@1.x"
-          echo "$(timestamp)	▲  Warning: Bun is used as a package manager at build time only, not at runtime with Functions"
-          echo "$(timestamp)	▲  Installing dependencies..."
-          echo "$(timestamp)	▲  bun install v$(bun -v) ($(echo $RANDOM | md5sum | head -c 8))"
-          echo "$(timestamp)	▲  Checked 611 installs across 673 packages (no changes) [30.00ms]"
-          echo "$(timestamp)	▲  Detected Next.js version: $(jq -r '.dependencies.next' package.json)"
-          echo "$(timestamp)	▲  Running \"bun run build\""
-          echo "$(timestamp)	▲  $ next build"
-          echo "$(timestamp)	▲  Attention: Next.js now collects completely anonymous telemetry regarding usage."
-          echo "$(timestamp)	▲  This information is used to shape Next.js' roadmap and prioritize features."
-          echo "$(timestamp)	▲  You can learn more, including how to opt-out if you'd not like to participate in this anonymous program, by visiting the following URL:"
-          echo "$(timestamp)	▲  https://nextjs.org/telemetry"
-          echo "$(timestamp)	▲  ▲ Next.js $(jq -r '.dependencies.next' package.json)"
-          echo "$(timestamp)	▲  "
-          echo "$(timestamp)	▲  Creating an optimized production build ..."
-          sleep 2
-          echo "$(timestamp)	▲  (node:2320) [DEP0040] DeprecationWarning: The \`punycode\` module is deprecated. Please use a userland alternative instead."
-          echo "$(timestamp)	▲  (Use \`node --trace-deprecation ...\` to show where the warning was created)"
-          sleep 4
-          echo "$(timestamp)	▲  (node:2368) [DEP0040] DeprecationWarning: The \`punycode\` module is deprecated. Please use a userland alternative instead."
-          echo "$(timestamp)	▲  (Use \`node --trace-deprecation ...\` to show where the warning was created)"
-          sleep 2
-          echo "$(timestamp)	▲  ✓ Compiled successfully"
-          echo "$(timestamp)	▲  Linting and checking validity of types ..."
-          sleep 3
-          echo "$(timestamp)	▲  Collecting page data ..."
-          sleep 2
-          echo "$(timestamp)	▲  Generating static pages (0/5) ..."
-          sleep 1
-          echo "$(timestamp)	▲  Generating static pages (1/5)"
-          echo "$(timestamp)	▲  Generating static pages (2/5) "
-          echo "$(timestamp)	▲    Generating static pages (3/5) "
-          echo "$(timestamp)	▲  ✓ Generating static pages (5/5)"
-          echo "$(timestamp)	▲  Finalizing page optimization ..."
-          echo "$(timestamp)	▲  Collecting build traces ..."
-          sleep 5
-          echo "$(timestamp)	▲  "
-          echo "$(timestamp)	▲  Route (app)                              Size     First Load JS"
-          echo "$(timestamp)	▲  ┌ ○ /                                    136 B           105 kB"
-          echo "$(timestamp)	▲  └ ○ /_not-found                          979 B           106 kB"
-          echo "$(timestamp)	▲  + First Load JS shared by all            105 kB"
-          echo "$(timestamp)	▲  ├ chunks/4bd1b696-20882bf820444624.js  52.9 kB"
-          echo "$(timestamp)	▲  ├ chunks/517-03da3b76e13269b5.js       50.5 kB"
-          echo "$(timestamp)	▲  └ other shared chunks (total)          1.88 kB"
-          echo "$(timestamp)	▲  ○  (Static)  prerendered as static content"
-          echo "$(timestamp)	▲  Traced Next.js server files in: 286.569ms"
-          echo "$(timestamp)	▲  Created all serverless functions in: 76.12ms"
-          echo "$(timestamp)	▲  Collected static files (public/, static/, .next/static): 4.438ms"
-          
-          # Create output directory structure
-          mkdir -p .vercel/output/static/_worker.js
-          
-          # Create dummy files to simulate build output
-          touch .vercel/output/static/_worker.js/index.js
-          touch .vercel/output/static/_routes.json
-          
-          # Calculate build time
-          END_TIME=$(date +%s)
-          BUILD_TIME=$((END_TIME - START_TIME))
-          
-          echo "$(timestamp)	▲  Build Completed in .vercel/output [${BUILD_TIME}s]"
-          echo "$(timestamp)	⚡️ Completed \`npx vercel build\`."
-          echo "$(timestamp)	"
-          echo "$(timestamp)	⚡️ Build Summary (@cloudflare/next-on-pages v1.13.8)"
-          echo "$(timestamp)	⚡️ "
-          echo "$(timestamp)	⚡️ Prerendered Routes (3)"
-          echo "$(timestamp)	⚡️   ┌ /"
-          echo "$(timestamp)	⚡️   ├ /favicon.ico"
-          echo "$(timestamp)	⚡️   └ /index.rsc"
-          echo "$(timestamp)	⚡️ "
-          echo "$(timestamp)	⚡️ Other Static Assets (32)"
-          echo "$(timestamp)	⚡️   ┌ /_app.rsc.json"
-          echo "$(timestamp)	⚡️   ├ /_document.rsc.json"
-          echo "$(timestamp)	⚡️   ├ /_error.rsc.json"
-          echo "$(timestamp)	⚡️   ├ /404.html"
-          echo "$(timestamp)	⚡️   └ ... 28 more"
-          echo "$(timestamp)	"
-          echo "$(timestamp)	⚡️ Build log saved to '.vercel/output/static/_worker.js/nop-build-log.json'"
-          echo "$(timestamp)	⚡️ Generated '.vercel/output/static/_worker.js/index.js'."
-          echo "$(timestamp)	⚡️ Build completed in 0.07s"
-          echo "$(timestamp)	Finished"
-
-      - name: Simulate Wrangler Upload
+          docker build -t cloudflare-pages-sim -f ./Dockerfile.cloudflare .
+                    
+      - name: Run deployment simulation in Docker
         run: |
-          timestamp() {
-            date -u +"%Y-%m-%dT%H:%M:%S.%NZ"
-          }
+          docker run --rm -v ${PWD}:/app cloudflare-pages-sim
           
-          echo "$(timestamp)	Checking for configuration in a Wrangler configuration file (BETA)"
-          echo "$(timestamp)	"
-          echo "$(timestamp)	Found wrangler.toml file. Reading build configuration..."
-          echo "$(timestamp)	pages_build_output_dir: ${{ env.BUILD_OUTPUT_DIR }}"
-          echo "$(timestamp)	Build environment variables: "
-          echo "$(timestamp)	  - NODE_VERSION: 22.12.0"
-          sleep 1
-          echo "$(timestamp)	Successfully read wrangler.toml file."
-          echo "$(timestamp)	Found _worker.js in output directory. Uploading."
-          echo "$(timestamp)	 ⛅️ wrangler 3.101.0"
-          echo "$(timestamp)	-------------------"
-          sleep 1
-          echo "$(timestamp)	Attaching additional modules:"
-          echo "$(timestamp)	┌───────────────────────────────────────────┬──────┬──────────┐"
-          echo "$(timestamp)	│ Name                                      │ Type │ Size     │"
-          echo "$(timestamp)	├───────────────────────────────────────────┼──────┼──────────┤"
-          echo "$(timestamp)	│ __next-on-pages-dist__/cache/adaptor.js   │ esm  │ 2.29 KiB │"
-          echo "$(timestamp)	├───────────────────────────────────────────┼──────┼──────────┤"
-          echo "$(timestamp)	│ __next-on-pages-dist__/cache/cache-api.js │ esm  │ 0.43 KiB │"
-          echo "$(timestamp)	├───────────────────────────────────────────┼──────┼──────────┤"
-          echo "$(timestamp)	│ __next-on-pages-dist__/cache/kv.js        │ esm  │ 0.35 KiB │"
-          echo "$(timestamp)	├───────────────────────────────────────────┼──────┼──────────┤"
-          echo "$(timestamp)	│ Total (3 modules)                         │      │ 3.06 KiB │"
-          echo "$(timestamp)	└───────────────────────────────────────────┴──────┴──────────┘"
-          echo "$(timestamp)	✨ Compiled Worker successfully"
-          sleep 1
-          echo "$(timestamp)	Found _routes.json in output directory. Uploading."
-          echo "$(timestamp)	Validating asset output directory"
-          sleep 2
-          echo "$(timestamp)	Deploying your site to Cloudflare's global network..."
-          sleep 2
-          echo "$(timestamp)	Parsed 1 valid header rule."
-          sleep 1
-          echo "$(timestamp)	Uploading... (32/36)"
-          sleep 0.5
-          echo "$(timestamp)	Uploading... (34/36)"
-          sleep 0.1
-          echo "$(timestamp)	Uploading... (35/36)"
-          sleep 0.2
-          echo "$(timestamp)	Uploading... (36/36)"
-          echo "$(timestamp)	✨ Success! Uploaded 4 files (32 already uploaded) (1.02 sec)"
-          echo "$(timestamp)	"
-          sleep 0.3
-          echo "$(timestamp)	✨ Upload complete!"
-          sleep 3
-          echo "$(timestamp)	Success: Assets published!"
-          sleep 2
-          echo "$(timestamp)	Success: Your site was deployed!"
-          
-          # Save logs to a file for reference
-          mkdir -p logs
-          cat $GITHUB_STEP_SUMMARY > logs/cloudflare-deploy-simulation.log
-
-      - name: Upload Build Logs
-        uses: actions/upload-artifact@v3
-        with:
-          name: cloudflare-pages-logs
-          path: logs/cloudflare-deploy-simulation.log
+      - name: Output simulation logs
+        run: |
+          echo "Cloudflare Pages simulation completed"
+          echo "Branch: ${{ github.ref_name }}"
+          echo "Commit: ${{ github.sha }}"
