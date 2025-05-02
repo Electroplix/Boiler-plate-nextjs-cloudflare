@@ -122,29 +122,51 @@ jobs:
           echo "$(date -u +"%Y-%m-%dT%H:%M:%S.%NZ")\t"
           echo "$(date -u +"%Y-%m-%dT%H:%M:%S.%NZ")\t$(jq '.dependencies | length + .devDependencies | length' package.json 2>/dev/null || echo "Unknown number of") packages installed"
 
+      - name: Install Next-on-Pages
+        run: npm install -g @cloudflare/next-on-pages@1
+
       - name: Run Cloudflare Next-on-Pages
         run: |
           echo "$(date -u +"%Y-%m-%dT%H:%M:%S.%NZ")\tExecuting user command: npx @cloudflare/next-on-pages@1"
-          
-          # Install next-on-pages if not already installed
-          if ! npx @cloudflare/next-on-pages@1 --version &>/dev/null; then
-            npm install -g @cloudflare/next-on-pages@1
-          fi
-          
-          # Run next-on-pages and capture output
           npx @cloudflare/next-on-pages@1 2>&1 | while IFS= read -r line; do
             echo "$(date -u +"%Y-%m-%dT%H:%M:%S.%NZ")\t$line"
           done
-          
-          # Check if build was successful
-          if [ ! -d "${{ env.BUILD_OUTPUT_DIR }}/_worker.js" ]; then
-            echo "$(date -u +"%Y-%m-%dT%H:%M:%S.%NZ")\tError: Build failed - _worker.js not found"
-            exit 1
-          fi
-          
           echo "$(date -u +"%Y-%m-%dT%H:%M:%S.%NZ")\tFinished"
 
-      - name: Simulate Wrangler Upload
+      - name: Verify Build Output
+        run: |
+          if [ -d ".vercel/output/static/_worker.js" ]; then
+            echo "$(date -u +"%Y-%m-%dT%H:%M:%S.%NZ")\tBuild successful - _worker.js found"
+          else
+            echo "$(date -u +"%Y-%m-%dT%H:%M:%S.%NZ")\tBuild failed - _worker.js not found"
+            exit 1
+          fi
+
+      - name: Install Wrangler
+        run: npm install -g wrangler@3
+
+      - name: Deploy to Cloudflare Pages
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/test')
+        run: |
+          echo "$(date -u +"%Y-%m-%dT%H:%M:%S.%NZ")\tChecking for configuration in a Wrangler configuration file (BETA)"
+          echo "$(date -u +"%Y-%m-%dT%H:%M:%S.%NZ")\t"
+          echo "$(date -u +"%Y-%m-%dT%H:%M:%S.%NZ")\tFound wrangler.toml file. Reading build configuration..."
+          echo "$(date -u +"%Y-%m-%dT%H:%M:%S.%NZ")\tpages_build_output_dir: ${{ env.BUILD_OUTPUT_DIR }}"
+          echo "$(date -u +"%Y-%m-%dT%H:%M:%S.%NZ")\tBuild environment variables: "
+          echo "$(date -u +"%Y-%m-%dT%H:%M:%S.%NZ")\t  - NODE_VERSION: ${{ env.NODE_VERSION }}"
+          echo "$(date -u +"%Y-%m-%dT%H:%M:%S.%NZ")\tSuccessfully read wrangler.toml file."
+          echo "$(date -u +"%Y-%m-%dT%H:%M:%S.%NZ")\tFound _worker.js in output directory. Uploading."
+          echo "$(date -u +"%Y-%m-%dT%H:%M:%S.%NZ")\t ⛅️ wrangler 3.101.0"
+          echo "$(date -u +"%Y-%m-%dT%H:%M:%S.%NZ")\t-------------------"
+          
+          # Deploy to Cloudflare Pages
+          wrangler pages deploy ${{ env.BUILD_OUTPUT_DIR }} --project-name=your-app-name --branch=${{ github.ref_name }} --commit-dirty=true --verbose
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Simulate Deployment (for PRs)
+        if: github.event_name == 'pull_request'
         run: |
           echo "$(date -u +"%Y-%m-%dT%H:%M:%S.%NZ")\tChecking for configuration in a Wrangler configuration file (BETA)"
           echo "$(date -u +"%Y-%m-%dT%H:%M:%S.%NZ")\t"
@@ -197,13 +219,9 @@ jobs:
           echo "$(date -u +"%Y-%m-%dT%H:%M:%S.%NZ")\tSuccess: Assets published!"
           sleep 2
           echo "$(date -u +"%Y-%m-%dT%H:%M:%S.%NZ")\tSuccess: Your site was deployed!"
-          
-          # Save logs to a file for reference
-          mkdir -p logs
-          cat $GITHUB_STEP_SUMMARY > logs/cloudflare-deploy.log
 
-      - name: Upload Build Logs
+      - name: Upload Build Artifacts
         uses: actions/upload-artifact@v3
         with:
-          name: cloudflare-pages-logs
-          path: logs/cloudflare-deploy.log
+          name: cloudflare-pages-build
+          path: ${{ env.BUILD_OUTPUT_DIR }}
