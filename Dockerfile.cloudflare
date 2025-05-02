@@ -1,11 +1,11 @@
 FROM node:18-alpine
 
-# Install Bun
-RUN apk add --no-cache curl unzip
+# Install Bun - fix for Alpine Linux
+RUN apk add --no-cache curl unzip bash
 RUN curl -fsSL https://bun.sh/install | bash
 
 # Set environment variables to match Cloudflare Pages
-ENV NODE_VERSION=18
+ENV NODE_VERSION=22.12.0
 ENV BUN_VERSION=latest
 ENV CF_PAGES=1
 ENV CF_PAGES_BRANCH=${GITHUB_REF_NAME:-dev}
@@ -14,16 +14,27 @@ ENV CF_PAGES_URL=http://localhost:8788
 
 WORKDIR /app
 
-# Copy package.json and install dependencies
-COPY package.json .
-COPY bun.lockb .
-RUN ~/.bun/bin/bun install
+# Copy package.json
+COPY package.json ./
 
 # Copy the rest of the application
-COPY . .
+COPY . ./
+
+# Install dependencies using either bun or npm
+RUN export PATH=$PATH:$HOME/.bun/bin && \
+    if command -v bun &> /dev/null; then \
+      bun install; \
+    else \
+      npm install; \
+    fi
 
 # Build the application
-RUN ~/.bun/bin/bun run build
+RUN export PATH=$PATH:$HOME/.bun/bin && \
+    if command -v bun &> /dev/null; then \
+      bun run build; \
+    else \
+      npm run build; \
+    fi
 
 # Simulate Cloudflare Pages deployment process
 RUN echo "🚀 Starting Cloudflare Pages deployment simulation..."
@@ -39,5 +50,4 @@ CMD ["sh", "-c", "echo '📋 Deployment Logs:' && \
      echo '✓ Optimized assets' && \
      echo '✓ Prepared for deployment' && \
      echo '✓ Simulated deployment complete' && \
-     echo '🌐 Your site would be available at: https://${CF_PAGES_BRANCH}.your-project-name.pages.dev' && \
-     ~/.bun/bin/bun run start"]
+     echo '🌐 Your site would be available at: https://${CF_PAGES_BRANCH}.your-project-name.pages.dev'"]
